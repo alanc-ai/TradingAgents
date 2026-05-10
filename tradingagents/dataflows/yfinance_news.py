@@ -75,30 +75,38 @@ def get_news_yfinance(
         start_dt = datetime.strptime(start_date, "%Y-%m-%d")
         end_dt = datetime.strptime(end_date, "%Y-%m-%d")
 
-        news_str = ""
-        filtered_count = 0
+        def _format(data: dict) -> str:
+            pub = data["pub_date"].strftime("%Y-%m-%d") if data["pub_date"] else "unknown date"
+            out = f"### {data['title']} (source: {data['publisher']}, published: {pub})\n"
+            if data["summary"]:
+                out += f"{data['summary']}\n"
+            if data["link"]:
+                out += f"Link: {data['link']}\n"
+            return out + "\n"
 
+        in_window = []
+        all_articles = []
         for article in news:
             data = _extract_article_data(article)
-
-            # Filter by date if publish time is available
+            all_articles.append(data)
             if data["pub_date"]:
-                pub_date_naive = data["pub_date"].replace(tzinfo=None)
-                if not (start_dt <= pub_date_naive <= end_dt + relativedelta(days=1)):
-                    continue
+                pub_naive = data["pub_date"].replace(tzinfo=None)
+                if start_dt <= pub_naive <= end_dt + relativedelta(days=1):
+                    in_window.append(data)
 
-            news_str += f"### {data['title']} (source: {data['publisher']})\n"
-            if data["summary"]:
-                news_str += f"{data['summary']}\n"
-            if data["link"]:
-                news_str += f"Link: {data['link']}\n"
-            news_str += "\n"
-            filtered_count += 1
+        if in_window:
+            body = "".join(_format(d) for d in in_window)
+            return f"## {ticker} News, from {start_date} to {end_date}:\n\n{body}"
 
-        if filtered_count == 0:
-            return f"No news found for {ticker} between {start_date} and {end_date}"
-
-        return f"## {ticker} News, from {start_date} to {end_date}:\n\n{news_str}"
+        # Fallback: yfinance.Ticker.get_news() returns only the latest ~20 articles
+        # with no historical query support. If none fall in the requested window,
+        # return all articles with publish dates so the agent can judge relevance.
+        body = "".join(_format(d) for d in all_articles)
+        return (
+            f"## {ticker} News (vendor returned latest {len(all_articles)} articles; "
+            f"none within requested window {start_date} to {end_date}; "
+            f"dates shown per article — yfinance does not support historical news queries):\n\n{body}"
+        )
 
     except Exception as e:
         return f"Error fetching news for {ticker}: {str(e)}"
